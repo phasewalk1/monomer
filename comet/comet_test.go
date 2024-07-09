@@ -27,14 +27,14 @@ import (
 )
 
 const (
-	chainID = monomer.ChainID(0)
+	chainID = "test"
 )
 
 func TestABCI(t *testing.T) {
-	app := testapp.NewTest(t, chainID.String())
+	app := testapp.NewTest(t, chainID)
 
 	_, err := app.InitChain(context.Background(), &abcitypes.RequestInitChain{
-		ChainId: chainID.String(),
+		ChainId: chainID,
 		AppStateBytes: func() []byte {
 			appStateBytes, err := json.Marshal(testapp.MakeGenesisAppState(t, app))
 			require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestABCI(t *testing.T) {
 	// Build bock with tx.
 	height := int64(1)
 	resultFinalizeBlock, err := app.FinalizeBlock(context.Background(), &abcitypes.RequestFinalizeBlock{
-		Txs:    [][]byte{testapp.ToTx(t, k, v, sk, pk, acc, ctx)},
+		Txs:    [][]byte{testapp.ToTx(t, k, v, chainID, sk, pk, acc, acc.GetSequence(), ctx)},
 		Height: height,
 	})
 	require.NoError(t, err)
@@ -128,9 +128,9 @@ func TestStatus(t *testing.T) {
 }
 
 func TestBroadcastTx(t *testing.T) {
-	app := testapp.NewTest(t, chainID.String())
+	app := testapp.NewTest(t, chainID)
 	_, err := app.InitChain(context.Background(), &abcitypes.RequestInitChain{
-		ChainId: chainID.String(),
+		ChainId: chainID,
 		AppStateBytes: func() []byte {
 			appStateBytes, err := json.Marshal(testapp.MakeGenesisAppState(t, app))
 			require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestBroadcastTx(t *testing.T) {
 	broadcastTxAPI := comet.NewBroadcastTxAPI(app, mpool)
 
 	// Success case.
-	tx := testapp.ToTx(t, "k1", "v1", sk, pk, acc, ctx)
+	tx := testapp.ToTx(t, "k1", "v1", chainID, sk, pk, acc, acc.GetSequence(), ctx)
 	result, err := broadcastAPI.BroadcastTx(&jsonrpctypes.Context{}, tx)
 	require.NoError(t, err)
 	// We trust that the other fields are set correctly.

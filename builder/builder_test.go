@@ -42,7 +42,7 @@ func TestBuild(t *testing.T) {
 		mempool       map[string]string
 		noTxPool      bool
 	}{
-		// "no txs": {},
+		"no txs": {},
 		"txs in inclusion list": {
 			inclusionList: map[string]string{
 				"k1": "v1",
@@ -82,32 +82,11 @@ func TestBuild(t *testing.T) {
 		t.Run(description, func(t *testing.T) {
 			app := testapp.NewTest(t, chainID.String())
 
-			_, err := app.InitChain(context.Background(), &abcitypes.RequestInitChain{
-				ChainId: chainID.String(),
-				AppStateBytes: func() []byte {
-					appStateBytes, err := json.Marshal(testapp.MakeGenesisAppState(t, app))
-					require.NoError(t, err)
-					return appStateBytes
-				}(),
-			})
-			require.NoError(t, err)
-
-			ctx := app.GetContext(false)
-
-			sk, pk, acc := app.TestAccount(ctx)
-
-			inclusionListTxs := testapp.ToTxs(t, test.inclusionList, sk, pk, acc, ctx)
-			mempoolTxs := testapp.ToTxs(t, test.mempool, sk, pk, acc, ctx)
-
-			pool := mempool.New(testutils.NewMemDB(t))
-			for _, tx := range mempoolTxs {
-				require.NoError(t, pool.Enqueue(tx))
-			}
 			blockStore := store.NewBlockStore(testutils.NewMemDB(t))
 			txStore := txstore.NewTxStore(testutils.NewCometMemDB(t))
 
 			g := &genesis.Genesis{
-				ChainID:  0,
+				ChainID:  chainID,
 				AppState: testapp.MakeGenesisAppState(t, app),
 			}
 
@@ -118,10 +97,31 @@ func TestBuild(t *testing.T) {
 			})
 			// +1 because we want it to be buffered even when mempool and inclusion list are empty.
 			subChannelLen := len(test.mempool) + len(test.inclusionList) + 1
-			subscription, err := eventBus.Subscribe(ctx, "test", &queryAll{}, subChannelLen)
+			subscription, err := eventBus.Subscribe(context.Background(), "test", &queryAll{}, subChannelLen)
 			require.NoError(t, err)
 
-			require.NoError(t, g.Commit(ctx, app, blockStore))
+			require.NoError(t, g.Commit(context.Background(), app, blockStore))
+
+			_, err = app.InitChain(context.Background(), &abcitypes.RequestInitChain{
+				ChainId: chainID.String(),
+				AppStateBytes: func() []byte {
+					appStateBytes, err := json.Marshal(testapp.MakeGenesisAppState(t, app))
+					require.NoError(t, err)
+					return appStateBytes
+				}(),
+			})
+			require.NoError(t, err)
+
+			ctx := app.GetContext(false)
+			sk, pk, acc := app.TestAccount(ctx)
+
+			inclusionListTxs := testapp.ToTxs(t, test.inclusionList, chainID.String(), sk, pk, acc, acc.GetSequence(), ctx)
+			mempoolTxs := testapp.ToTxs(t, test.mempool, chainID.String(), sk, pk, acc, uint64(len(inclusionListTxs)), ctx)
+
+			pool := mempool.New(testutils.NewMemDB(t))
+			for _, tx := range mempoolTxs {
+				require.NoError(t, pool.Enqueue(tx))
+			}
 
 			b := builder.New(
 				pool,
@@ -256,7 +256,7 @@ func TestRollback(t *testing.T) {
 	}
 	block, err := b.Build(context.Background(), &builder.Payload{
 		Timestamp:            g.Time + 1,
-		InjectedTransactions: bfttypes.ToTxs(testapp.ToTxs(t, kvs, sk, pk, acc, ctx)),
+		InjectedTransactions: bfttypes.ToTxs(testapp.ToTxs(t, kvs, chainID.String(), sk, pk, acc, acc.GetSequence(), ctx)),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, block)
@@ -282,7 +282,7 @@ func TestRollback(t *testing.T) {
 	// We trust that the other parts of a block store rollback were done as well.
 
 	// Tx store.
-	for _, tx := range bfttypes.ToTxs(testapp.ToTxs(t, kvs, sk, pk, acc, ctx)) {
+	for _, tx := range bfttypes.ToTxs(testapp.ToTxs(t, kvs, chainID.String(), sk, pk, acc, acc.GetSequence(), ctx)) {
 		result, err := txStore.Get(tx.Hash())
 		require.NoError(t, err)
 		require.Nil(t, result)
